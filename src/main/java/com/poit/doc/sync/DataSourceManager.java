@@ -21,6 +21,8 @@ public final class DataSourceManager {
     private static final int DEFAULT_POOL_SIZE = 3;
     private static final int DEFAULT_CONNECTION_TIMEOUT = 10000; // 10秒
     private static final int DEFAULT_SOCKET_TIMEOUT = 30000; // 30秒
+    private static final String MYSQL_DRIVER = "com.mysql.cj.jdbc.Driver";
+    private static final String H2_DRIVER = "org.h2.Driver";
 
     private DataSourceManager() {
     }
@@ -56,7 +58,7 @@ public final class DataSourceManager {
         config.setJdbcUrl(jdbcUrl);
         config.setUsername(user);
         config.setPassword(password);
-        config.setDriverClassName("com.mysql.cj.jdbc.Driver");
+        config.setDriverClassName(resolveDriverClassName(jdbcUrl));
 
         // 连接池配置
         config.setMaximumPoolSize(DEFAULT_POOL_SIZE);
@@ -68,8 +70,10 @@ public final class DataSourceManager {
         config.setMaxLifetime(1800000);
 
         // MySQL 特定的超时设置
-        config.addDataSourceProperty("connectTimeout", String.valueOf(DEFAULT_CONNECTION_TIMEOUT));
-        config.addDataSourceProperty("socketTimeout", String.valueOf(DEFAULT_SOCKET_TIMEOUT));
+        if (isMySqlUrl(jdbcUrl)) {
+            config.addDataSourceProperty("connectTimeout", String.valueOf(DEFAULT_CONNECTION_TIMEOUT));
+            config.addDataSourceProperty("socketTimeout", String.valueOf(DEFAULT_SOCKET_TIMEOUT));
+        }
 
         // 连接测试
         config.setConnectionTestQuery("SELECT 1");
@@ -79,5 +83,16 @@ public final class DataSourceManager {
 
     private static String buildKey(String jdbcUrl, String user) {
         return jdbcUrl + "|" + user;
+    }
+
+    private static String resolveDriverClassName(String jdbcUrl) {
+        if (jdbcUrl != null && jdbcUrl.startsWith("jdbc:h2:")) {
+            return H2_DRIVER;
+        }
+        return MYSQL_DRIVER;
+    }
+
+    private static boolean isMySqlUrl(String jdbcUrl) {
+        return jdbcUrl != null && jdbcUrl.startsWith("jdbc:mysql:");
     }
 }
