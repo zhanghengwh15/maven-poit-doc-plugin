@@ -1,9 +1,12 @@
 package com.poit.doc.sync;
 
-import com.ly.doc.builder.HtmlApiDocBuilder;
+import com.ly.doc.builder.ApiDataBuilder;
+import com.ly.doc.model.ApiAllData;
 import com.ly.doc.model.ApiConfig;
+import com.ly.doc.model.ApiDoc;
 import com.ly.doc.model.SourceCodePath;
 import org.junit.jupiter.api.Test;
+
 
 public class SmartDocTest {
 
@@ -14,14 +17,10 @@ public class SmartDocTest {
         // 1. 基础配置
         config.setServerUrl("http://localhost:8080");
         config.setStrict(false); // 关闭严格模式，防止因为缺少注释报错中断
-        config.setAllInOne(true);
-
-        // 将生成的文档放到 app 模块的 target 目录下
-        config.setOutPath("/Users/zhangheng/poi_tech/poit-wine-mes/poit-wine-mes-app/target/doc");
-
+        config.setProjectName("WineMES");
         // 项目根目录
+        config.setFramework("spring");
         String basePath = "/Users/zhangheng/poi_tech/poit-wine-mes/";
-
 
         // 2. 核心：将所有包含 Java 代码的模块 src/main/java 都加进来！
         config.setSourceCodePaths(
@@ -41,11 +40,10 @@ public class SmartDocTest {
         // 3. 执行生成
         System.out.println("开始扫描多模块代码并生成文档...");
         long start = System.currentTimeMillis();
-
+        config.setBaseDir(basePath);
+        config.setCodePath(basePath);
         // 生成 HTML 格式
-        HtmlApiDocBuilder.buildApiDoc(config);
-
+        ApiAllData data = ApiDataBuilder.getApiData(config);
         System.out.println("生成完毕！耗时: " + (System.currentTimeMillis() - start) + "ms");
-        System.out.println("请在浏览器打开: " + config.getOutPath() + "/index.html");
     }
 }
