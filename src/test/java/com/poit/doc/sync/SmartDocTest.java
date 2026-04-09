@@ -7,6 +7,8 @@ import com.ly.doc.model.ApiDoc;
 import com.ly.doc.model.SourceCodePath;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 
 public class SmartDocTest {
 
@@ -14,6 +16,8 @@ public class SmartDocTest {
     public void testGenerateDoc() {
         ApiConfig config = new ApiConfig();
 
+
+        // todo  对应的
         // 1. 基础配置
         config.setServerUrl("http://localhost:8080");
         config.setStrict(false); // 关闭严格模式，防止因为缺少注释报错中断
@@ -44,6 +48,12 @@ public class SmartDocTest {
         config.setCodePath(basePath);
         // 生成 HTML 格式
         ApiAllData data = ApiDataBuilder.getApiData(config);
+
+        List<ApiDoc> controllers = ApiDocSupport.flattenControllerDocs(data.getApiDocList());
+
+        // 对应的转换的实体类。
+
+
         System.out.println("生成完毕！耗时: " + (System.currentTimeMillis() - start) + "ms");
     }
 }

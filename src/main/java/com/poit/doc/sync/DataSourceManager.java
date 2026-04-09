@@ -19,7 +19,7 @@ public final class DataSourceManager {
     private static final Map<String, HikariDataSource> DATA_SOURCES = new ConcurrentHashMap<>();
 
     private static final int DEFAULT_POOL_SIZE = 3;
-    private static final int DEFAULT_CONNECTION_TIMEOUT = 10000; // 10秒
+    private static final int DEFAULT_CONNECTION_TIMEOUT = 30000; // 30秒
     private static final int DEFAULT_SOCKET_TIMEOUT = 30000; // 30秒
     private static final String MYSQL_DRIVER = "com.mysql.cj.jdbc.Driver";
     private static final String H2_DRIVER = "org.h2.Driver";

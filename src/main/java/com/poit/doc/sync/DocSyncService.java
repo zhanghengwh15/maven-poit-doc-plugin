@@ -3,25 +3,28 @@ package com.poit.doc.sync;
 import com.google.gson.Gson;
 import com.ly.doc.model.ApiDoc;
 import com.ly.doc.model.ApiMethodDoc;
+import com.poit.doc.sync.entity.ApiInterfaceEntity;
+import com.poit.doc.sync.entity.ApiModelDefinitionEntity;
 
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 
 /**
- * 将打平后的接口与模型定义 Upsert 到 MySQL（JSON 字段存字段明细）。
+ * 将打平后的接口与模型定义同步到 MySQL（JSON 字段存字段明细）。
  * <p>
- * 使用 HikariCP 连接池 + 批量操作，支持超时配置防止插件卡死构建流程。
+ * 使用 HikariCP 连接池 + 轻量反射 Mapper，支持超时配置防止插件卡死构建流程。
  * </p>
  */
 public class DocSyncService {
 
     private static final Gson GSON = new Gson();
-    private static final int BATCH_SIZE = 100;
+    private static final int SQL_TIMEOUT_SECONDS = 10;
 
     private final String jdbcUrl;
     private final String user;
@@ -57,12 +60,12 @@ public class DocSyncService {
             }
         }
 
-        // 2. 使用连接池批量写入
+        // 2. 使用连接池写入
         try (Connection conn = DataSourceManager.getConnection(jdbcUrl, user, password)) {
             conn.setAutoCommit(false);
             try {
-                batchUpsertModels(conn, new ArrayList<>(mergedModels.entrySet()));
-                batchUpsertInterfaces(conn, interfaces);
+                upsertModels(conn, mergedModels);
+                upsertAndDeleteInterfaces(conn, interfaces);
                 conn.commit();
             } catch (SQLException ex) {
                 conn.rollback();
@@ -92,65 +95,110 @@ public class DocSyncService {
         return new InterfaceRecord(moduleName, apiName, path, method, reqRef, resRef, rawInfoJson);
     }
 
-    private void batchUpsertModels(Connection conn, List<Map.Entry<String, ModelInfo>> models) throws SQLException {
-        String sql = "INSERT INTO api_model_definition (full_name, simple_name, description, fields) "
-                + "VALUES (?, ?, ?, ?) "
-                + "ON DUPLICATE KEY UPDATE simple_name = VALUES(simple_name), description = VALUES(description), "
-                + "fields = VALUES(fields), modify_time = CURRENT_TIMESTAMP";
-
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            int count = 0;
-            for (Map.Entry<String, ModelInfo> e : models) {
-                String fullName = e.getKey();
-                ModelInfo info = e.getValue();
-                ps.setString(1, fullName);
-                ps.setString(2, info.getSimpleName());
-                ps.setString(3, info.getDescription());
-                ps.setString(4, info.getFieldsJson());
-                ps.addBatch();
-
-                if (++count % BATCH_SIZE == 0) {
-                    ps.executeBatch();
-                }
-            }
-            if (count % BATCH_SIZE != 0) {
-                ps.executeBatch();
+    private void upsertModels(Connection conn, Map<String, ModelInfo> models) throws SQLException {
+        for (Map.Entry<String, ModelInfo> entry : models.entrySet()) {
+            String fullName = entry.getKey();
+            ModelInfo info = entry.getValue();
+            Map<String, Object> modelConditions = new LinkedHashMap<>();
+            modelConditions.put("fullName", fullName);
+            ApiModelDefinitionEntity existingModel = SimpleMapper.findOneByColumns(
+                    conn, ApiModelDefinitionEntity.class, modelConditions, SQL_TIMEOUT_SECONDS);
+            Long existingId = existingModel != null ? existingModel.getId() : null;
+            if (existingId == null) {
+                ApiModelDefinitionEntity insertEntity = new ApiModelDefinitionEntity();
+                insertEntity.setFullName(fullName);
+                insertEntity.setSimpleName(info.getSimpleName());
+                insertEntity.setDescription(info.getDescription());
+                insertEntity.setFields(info.getFieldsJson());
+                insertEntity.setRecStatus(1);
+                SimpleMapper.insert(conn, insertEntity, SQL_TIMEOUT_SECONDS);
+            } else {
+                ApiModelDefinitionEntity updateEntity = new ApiModelDefinitionEntity();
+                updateEntity.setId(existingId);
+                updateEntity.setSimpleName(info.getSimpleName());
+                updateEntity.setDescription(info.getDescription());
+                updateEntity.setFields(info.getFieldsJson());
+                updateEntity.setRecStatus(1);
+                SimpleMapper.updateById(conn, updateEntity, SQL_TIMEOUT_SECONDS);
             }
         }
     }
 
-    private void batchUpsertInterfaces(Connection conn, List<InterfaceRecord> interfaces) throws SQLException {
-        String sql = "INSERT INTO api_interface (service_name, service_version, env, module_name, api_name, "
-                + "path, method, req_model_ref, res_model_ref, raw_info) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                + "ON DUPLICATE KEY UPDATE service_version = VALUES(service_version), module_name = VALUES(module_name), "
-                + "api_name = VALUES(api_name), req_model_ref = VALUES(req_model_ref), "
-                + "res_model_ref = VALUES(res_model_ref), raw_info = VALUES(raw_info), "
-                + "modify_time = CURRENT_TIMESTAMP";
-
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            int count = 0;
-            for (InterfaceRecord r : interfaces) {
-                ps.setString(1, serviceName);
-                ps.setString(2, serviceVersion);
-                ps.setString(3, env);
-                ps.setString(4, r.moduleName != null ? r.moduleName : "");
-                ps.setString(5, r.apiName != null ? r.apiName : "");
-                ps.setString(6, r.path != null ? r.path : "");
-                ps.setString(7, r.method);
-                ps.setString(8, r.reqRef != null ? r.reqRef : "");
-                ps.setString(9, r.resRef != null ? r.resRef : "");
-                ps.setString(10, r.rawInfoJson);
-                ps.addBatch();
-
-                if (++count % BATCH_SIZE == 0) {
-                    ps.executeBatch();
-                }
-            }
-            if (count % BATCH_SIZE != 0) {
-                ps.executeBatch();
+    private void upsertAndDeleteInterfaces(Connection conn, List<InterfaceRecord> interfaces) throws SQLException {
+        Map<String, Long> existing = loadCurrentInterfaces(conn);
+        for (InterfaceRecord record : interfaces) {
+            String key = uniqueInterfaceKey(record.path, record.method);
+            Long existingId = existing.remove(key);
+            if (existingId == null) {
+                ApiInterfaceEntity insertEntity = toInsertEntity(record);
+                SimpleMapper.insert(conn, insertEntity, SQL_TIMEOUT_SECONDS);
+            } else {
+                ApiInterfaceEntity updateEntity = toUpdateEntity(existingId, record);
+                SimpleMapper.updateById(conn, updateEntity, SQL_TIMEOUT_SECONDS);
             }
         }
+
+        // 本次同步没有出现的接口，执行逻辑删除。
+        for (Long staleId : existing.values()) {
+            ApiInterfaceEntity deleteEntity = new ApiInterfaceEntity();
+            deleteEntity.setId(staleId);
+            deleteEntity.setRecStatus(0);
+            SimpleMapper.updateById(conn, deleteEntity, SQL_TIMEOUT_SECONDS);
+        }
+    }
+
+    private ApiInterfaceEntity toInsertEntity(InterfaceRecord record) {
+        ApiInterfaceEntity entity = new ApiInterfaceEntity();
+        entity.setServiceName(serviceName);
+        entity.setServiceVersion(serviceVersion);
+        entity.setEnv(env);
+        entity.setModuleName(record.moduleName != null ? record.moduleName : "");
+        entity.setApiName(record.apiName != null ? record.apiName : "");
+        entity.setPath(record.path != null ? record.path : "");
+        entity.setMethod(normalizeMethod(record.method));
+        entity.setReqModelRef(record.reqRef != null ? record.reqRef : "");
+        entity.setResModelRef(record.resRef != null ? record.resRef : "");
+        entity.setRawInfo(record.rawInfoJson);
+        entity.setRecStatus(1);
+        return entity;
+    }
+
+    private ApiInterfaceEntity toUpdateEntity(Long id, InterfaceRecord record) {
+        ApiInterfaceEntity entity = new ApiInterfaceEntity();
+        entity.setId(id);
+        entity.setServiceVersion(serviceVersion);
+        entity.setModuleName(record.moduleName != null ? record.moduleName : "");
+        entity.setApiName(record.apiName != null ? record.apiName : "");
+        entity.setReqModelRef(record.reqRef != null ? record.reqRef : "");
+        entity.setResModelRef(record.resRef != null ? record.resRef : "");
+        entity.setRawInfo(record.rawInfoJson);
+        entity.setRecStatus(1);
+        return entity;
+    }
+
+    private Map<String, Long> loadCurrentInterfaces(Connection conn) throws SQLException {
+        Map<String, Object> conditions = new LinkedHashMap<>();
+        conditions.put("serviceName", serviceName);
+        conditions.put("env", env);
+        conditions.put("recStatus", 1);
+        List<ApiInterfaceEntity> rows = SimpleMapper.findByColumns(
+                conn, ApiInterfaceEntity.class, conditions, SQL_TIMEOUT_SECONDS);
+        Map<String, Long> result = new HashMap<>();
+        for (ApiInterfaceEntity row : rows) {
+            if (row.getId() != null) {
+                result.put(uniqueInterfaceKey(row.getPath(), row.getMethod()), row.getId());
+            }
+        }
+        return result;
+    }
+
+    private String uniqueInterfaceKey(String path, String method) {
+        String safePath = path == null ? "" : path;
+        return safePath + "#" + normalizeMethod(method);
+    }
+
+    private String normalizeMethod(String method) {
+        return method == null ? "" : method.trim().toUpperCase(Locale.ROOT);
     }
 
     /**
