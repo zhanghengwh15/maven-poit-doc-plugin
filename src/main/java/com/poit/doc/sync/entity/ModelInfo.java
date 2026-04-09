@@ -1,4 +1,4 @@
-package com.poit.doc.sync;
+package com.poit.doc.sync.entity;
 
 /**
  * 模型信息，用于存储到 api_model_definition 表。

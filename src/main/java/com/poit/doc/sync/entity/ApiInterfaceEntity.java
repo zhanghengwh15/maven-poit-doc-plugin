@@ -21,15 +21,17 @@ public class ApiInterfaceEntity {
     private String apiName;
     private String path;
     private String method;
+    private String pathParams;
+    private String queryParams;
+    private Long reqBodyModelId;
+    private Long resBodyModelId;
+    private String reqParamsMd5;
+    private String resParamsMd5;
     private Integer isDeprecated;
-    private String reqModelRef;
-    private String resModelRef;
     private String rawInfo;
     private LocalDateTime createTime;
     private LocalDateTime modifyTime;
     private Integer recStatus;
-    private Long createBy;
-    private Long modifyBy;
 
     public Long getId() {
         return id;
@@ -103,28 +105,60 @@ public class ApiInterfaceEntity {
         this.method = method;
     }
 
+    public String getPathParams() {
+        return pathParams;
+    }
+
+    public void setPathParams(String pathParams) {
+        this.pathParams = pathParams;
+    }
+
+    public String getQueryParams() {
+        return queryParams;
+    }
+
+    public void setQueryParams(String queryParams) {
+        this.queryParams = queryParams;
+    }
+
+    public Long getReqBodyModelId() {
+        return reqBodyModelId;
+    }
+
+    public void setReqBodyModelId(Long reqBodyModelId) {
+        this.reqBodyModelId = reqBodyModelId;
+    }
+
+    public Long getResBodyModelId() {
+        return resBodyModelId;
+    }
+
+    public void setResBodyModelId(Long resBodyModelId) {
+        this.resBodyModelId = resBodyModelId;
+    }
+
+    public String getReqParamsMd5() {
+        return reqParamsMd5;
+    }
+
+    public void setReqParamsMd5(String reqParamsMd5) {
+        this.reqParamsMd5 = reqParamsMd5;
+    }
+
+    public String getResParamsMd5() {
+        return resParamsMd5;
+    }
+
+    public void setResParamsMd5(String resParamsMd5) {
+        this.resParamsMd5 = resParamsMd5;
+    }
+
     public Integer getIsDeprecated() {
         return isDeprecated;
     }
 
     public void setIsDeprecated(Integer isDeprecated) {
         this.isDeprecated = isDeprecated;
-    }
-
-    public String getReqModelRef() {
-        return reqModelRef;
-    }
-
-    public void setReqModelRef(String reqModelRef) {
-        this.reqModelRef = reqModelRef;
-    }
-
-    public String getResModelRef() {
-        return resModelRef;
-    }
-
-    public void setResModelRef(String resModelRef) {
-        this.resModelRef = resModelRef;
     }
 
     public String getRawInfo() {
@@ -157,21 +191,5 @@ public class ApiInterfaceEntity {
 
     public void setRecStatus(Integer recStatus) {
         this.recStatus = recStatus;
-    }
-
-    public Long getCreateBy() {
-        return createBy;
-    }
-
-    public void setCreateBy(Long createBy) {
-        this.createBy = createBy;
-    }
-
-    public Long getModifyBy() {
-        return modifyBy;
-    }
-
-    public void setModifyBy(Long modifyBy) {
-        this.modifyBy = modifyBy;
     }
 }

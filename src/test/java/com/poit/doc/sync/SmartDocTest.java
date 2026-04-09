@@ -5,11 +5,17 @@ import com.ly.doc.model.ApiAllData;
 import com.ly.doc.model.ApiConfig;
 import com.ly.doc.model.ApiDoc;
 import com.ly.doc.model.SourceCodePath;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+/**
+ * 本地多模块工程扫描示例；依赖固定机器路径，默认不参与 CI。
+ */
+@Disabled("需要本机 poit-wine-mes 工程路径，仅本地调试时手动启用")
 public class SmartDocTest {
 
     @Test
@@ -50,6 +56,7 @@ public class SmartDocTest {
         ApiAllData data = ApiDataBuilder.getApiData(config);
 
         List<ApiDoc> controllers = ApiDocSupport.flattenControllerDocs(data.getApiDocList());
+        assertNotNull(controllers);
 
         // 对应的转换的实体类。
 

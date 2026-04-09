@@ -13,15 +13,15 @@ public class ApiModelDefinitionEntity {
 
     @Id("id")
     private Long id;
+    private String serviceName;
     private String fullName;
     private String simpleName;
     private String description;
+    private String modelMd5;
     private String fields;
     private LocalDateTime createTime;
     private LocalDateTime modifyTime;
     private Integer recStatus;
-    private Long createBy;
-    private Long modifyBy;
 
     public Long getId() {
         return id;
@@ -29,6 +29,14 @@ public class ApiModelDefinitionEntity {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public String getServiceName() {
+        return serviceName;
+    }
+
+    public void setServiceName(String serviceName) {
+        this.serviceName = serviceName;
     }
 
     public String getFullName() {
@@ -53,6 +61,14 @@ public class ApiModelDefinitionEntity {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public String getModelMd5() {
+        return modelMd5;
+    }
+
+    public void setModelMd5(String modelMd5) {
+        this.modelMd5 = modelMd5;
     }
 
     public String getFields() {
@@ -85,21 +101,5 @@ public class ApiModelDefinitionEntity {
 
     public void setRecStatus(Integer recStatus) {
         this.recStatus = recStatus;
-    }
-
-    public Long getCreateBy() {
-        return createBy;
-    }
-
-    public void setCreateBy(Long createBy) {
-        this.createBy = createBy;
-    }
-
-    public Long getModifyBy() {
-        return modifyBy;
-    }
-
-    public void setModifyBy(Long modifyBy) {
-        this.modifyBy = modifyBy;
     }
 }

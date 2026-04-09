@@ -1,9 +1,9 @@
 package com.poit.doc.sync;
 
 import com.ly.doc.model.ApiDoc;
+import com.poit.doc.sync.dataTransfer.DocSyncService;
 
 import java.io.File;
-import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -41,7 +41,8 @@ public final class StandaloneSyncMain {
 
         List<ApiDoc> roots = SmartDocBootstrap.loadApiDocs(cfg);
         List<ApiDoc> controllers = ApiDocSupport.flattenControllerDocs(roots);
-        DocSyncService sync = new DocSyncService(dbUrl, dbUser, dbPassword, svc, ver, env);
+        DocSyncService sync = new DocSyncService(dbUrl, dbUser, dbPassword, svc, ver, env,
+                opt.getOrDefault("projectname", new File(project).getName()));
         sync.sync(controllers);
         System.out.println("同步完成，Controller 文档数: " + controllers.size());
     }

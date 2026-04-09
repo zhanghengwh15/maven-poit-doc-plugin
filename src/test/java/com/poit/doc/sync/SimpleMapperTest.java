@@ -3,6 +3,7 @@ package com.poit.doc.sync;
 import com.poit.doc.sync.annotation.Column;
 import com.poit.doc.sync.annotation.Id;
 import com.poit.doc.sync.annotation.Table;
+import com.poit.doc.sync.dataTransfer.SimpleMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -2,7 +2,7 @@ package com.poit.doc.plugin;
 
 import com.ly.doc.model.ApiDoc;
 import com.poit.doc.sync.ApiDocSupport;
-import com.poit.doc.sync.DocSyncService;
+import com.poit.doc.sync.dataTransfer.DocSyncService;
 import com.poit.doc.sync.SmartDocBootstrap;
 import com.poit.doc.sync.SmartDocRunConfig;
 import org.apache.maven.artifact.DependencyResolutionRequiredException;
@@ -98,7 +98,8 @@ public class SyncDocMojo extends AbstractMojo {
         List<ApiDoc> controllers = ApiDocSupport.flattenControllerDocs(roots);
         getLog().info("Smart-doc 解析完成，待同步 Controller 文档数: " + controllers.size());
 
-        DocSyncService syncService = new DocSyncService(dbUrl, dbUser, dbPassword, serviceName, serviceVersion, env);
+        DocSyncService syncService = new DocSyncService(dbUrl, dbUser, dbPassword, serviceName, serviceVersion, env,
+                project.getArtifactId());
         try {
             syncService.sync(controllers);
         } catch (SQLException e) {

@@ -1,4 +1,4 @@
-package com.poit.doc.sync;
+package com.poit.doc.sync.dataTransfer;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;

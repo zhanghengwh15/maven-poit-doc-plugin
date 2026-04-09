@@ -3,6 +3,7 @@ package com.poit.doc.sync.util;
 import com.poit.doc.sync.annotation.Column;
 import com.poit.doc.sync.annotation.Id;
 import com.poit.doc.sync.annotation.Table;
+import com.poit.doc.sync.dataTransfer.SimpleMapper;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -12,7 +13,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 实体类元数据解析与缓存（按 {@link Class} 维度），与 {@link com.poit.doc.sync.SimpleMapper} 解耦。
+ * 实体类元数据解析与缓存（按 {@link Class} 维度），与 {@link SimpleMapper} 解耦。
  */
 public final class MetaCacheUtil {
 

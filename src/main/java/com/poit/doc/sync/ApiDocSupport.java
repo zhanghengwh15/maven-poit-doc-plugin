@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.ly.doc.model.ApiDoc;
 import com.ly.doc.model.ApiMethodDoc;
 import com.ly.doc.model.ApiParam;
+import com.poit.doc.sync.entity.ModelInfo;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -69,6 +70,21 @@ public final class ApiDocSupport {
         visitParamList(method.getPathParams(), acc, completed);
         visitParamList(method.getQueryParams(), acc, completed);
 
+        return toModelInfoMap(acc);
+    }
+
+    /**
+     * 仅从请求体 / 响应体参数树抽取模型（不含 path/query），用于 api_model_definition 入库。
+     */
+    public static Map<String, ModelInfo> extractModelsFromRequestAndResponse(ApiMethodDoc method) {
+        Map<String, ModelFields> acc = new LinkedHashMap<>();
+        Set<String> completed = new LinkedHashSet<>();
+        visitParamList(method.getRequestParams(), acc, completed);
+        visitParamList(method.getResponseParams(), acc, completed);
+        return toModelInfoMap(acc);
+    }
+
+    private static Map<String, ModelInfo> toModelInfoMap(Map<String, ModelFields> acc) {
         Map<String, ModelInfo> result = new LinkedHashMap<>();
         for (Map.Entry<String, ModelFields> e : acc.entrySet()) {
             String fullName = e.getKey();
