@@ -1,9 +1,7 @@
-package com.poit.doc.plugin;
+package com.poit.doc.scanner;
 
-import org.apache.maven.project.MavenProject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.Mockito;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -17,24 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SourceRootDiscoveryTest {
 
     @Test
-    void outermost_pom_directory_follows_parent_chain() {
-        MavenProject root = Mockito.mock(MavenProject.class);
-        MavenProject mid = Mockito.mock(MavenProject.class);
-        MavenProject leaf = Mockito.mock(MavenProject.class);
-        File rootDir = new File("/repo");
-        File leafDir = new File("/repo/services/app");
-        Mockito.when(leaf.getBasedir()).thenReturn(leafDir);
-        Mockito.when(leaf.getParent()).thenReturn(mid);
-        Mockito.when(mid.getBasedir()).thenReturn(new File("/repo/services"));
-        Mockito.when(mid.getParent()).thenReturn(root);
-        Mockito.when(root.getBasedir()).thenReturn(rootDir);
-        Mockito.when(root.getParent()).thenReturn(null);
-
-        assertEquals(rootDir, SourceRootDiscovery.outermostPomDirectory(leaf));
-    }
-
-    @Test
-    void walk_finds_nested_modules_and_skips_target(@TempDir Path temp) throws Exception {
+    void walk_finds_nested_modules_and_skips_target(@TempDir Path temp) {
         File repo = temp.toFile();
         assertTrue(new File(repo, "api/src/main/java").mkdirs());
         assertTrue(new File(repo, "app/src/main/java").mkdirs());
@@ -52,15 +33,11 @@ class SourceRootDiscoveryTest {
     }
 
     @Test
-    void discover_merges_walk_when_session_null(@TempDir Path temp) throws Exception {
+    void discover_from_tree_finds_module(@TempDir Path temp) {
         File repo = temp.toFile();
         assertTrue(new File(repo, "mod-a/src/main/java").mkdirs());
 
-        MavenProject leaf = Mockito.mock(MavenProject.class);
-        Mockito.when(leaf.getBasedir()).thenReturn(new File(repo, "mod-a"));
-        Mockito.when(leaf.getParent()).thenReturn(null);
-
-        List<String> roots = SourceRootDiscovery.discover(null, leaf, null);
+        List<String> roots = SourceRootDiscovery.discoverFromTree(repo, null);
         assertEquals(1, roots.size());
         assertTrue(roots.get(0).endsWith("src" + File.separator + "main" + File.separator + "java"));
     }
