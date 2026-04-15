@@ -149,8 +149,9 @@ public final class PoitApiScannerCli implements Callable<Integer> {
             }
         } else {
             List<String> discovered = SourceRootDiscovery.discoverFromTree(root, null);
-            if (!discovered.isEmpty()) {
-                cfg.setSourcePaths(discovered);
+            List<String> filtered = filterApiAndAppModules(discovered);
+            if (!filtered.isEmpty()) {
+                cfg.setSourcePaths(filtered);
             }
         }
 
@@ -173,5 +174,51 @@ public final class PoitApiScannerCli implements Callable<Integer> {
 
     private static boolean nonBlank(String s) {
         return s != null && !s.trim().isEmpty();
+    }
+
+    /**
+     * 过滤源码路径，只保留以 -api 或 -app 结尾的模块
+     *
+     * @param sourcePaths 原始源码路径列表
+     * @return 过滤后的源码路径列表
+     */
+    private static List<String> filterApiAndAppModules(List<String> sourcePaths) {
+        if (sourcePaths == null || sourcePaths.isEmpty()) {
+            return sourcePaths;
+        }
+        List<String> filtered = new ArrayList<>();
+        for (String path : sourcePaths) {
+            if (isApiOrAppModule(path)) {
+                filtered.add(path);
+            }
+        }
+        return filtered;
+    }
+
+    /**
+     * 判断路径是否属于 -api 或 -app 模块
+     * 匹配规则：路径中包含 "/xxx-api/" 或 "/xxx-app/" 格式的目录
+     *
+     * @param path 源码路径
+     * @return 是否为 api 或 app 模块
+     */
+    private static boolean isApiOrAppModule(String path) {
+        if (path == null || path.isEmpty()) {
+            return false;
+        }
+        String normalizedPath = path.replace("\\", "/");
+        String[] segments = normalizedPath.split("/");
+        // 从后往前查找，找包含 src/main/java 的上一级目录
+        for (int i = segments.length - 1; i >= 0; i--) {
+            if ("src".equals(segments[i])) {
+                // src 的上一级目录就是模块名
+                if (i > 0) {
+                    String moduleName = segments[i - 1];
+                    return moduleName.endsWith("-api") || moduleName.endsWith("-app");
+                }
+                break;
+            }
+        }
+        return false;
     }
 }
