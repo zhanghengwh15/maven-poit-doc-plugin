@@ -59,8 +59,6 @@ public class SmartDocTest {
         assertNotNull(controllers);
 
         // 对应的转换的实体类。
-
-
         System.out.println("生成完毕！耗时: " + (System.currentTimeMillis() - start) + "ms");
     }
 }
