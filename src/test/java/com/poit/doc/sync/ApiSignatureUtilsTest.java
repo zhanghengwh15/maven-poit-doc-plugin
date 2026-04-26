@@ -1,9 +1,8 @@
 package com.poit.doc.sync;
 
-import com.ly.doc.model.ApiParam;
+import com.poit.doc.scanner.model.ApiParam;
 import com.poit.doc.sync.util.ApiSignatureUtils;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -60,12 +59,11 @@ class ApiSignatureUtilsTest {
         assertEquals(md5, ApiSignatureUtils.md5ModelFieldsRows(rows2));
     }
 
-    private static ApiParam mockParam(String field, String type, boolean required) {
-        ApiParam p = Mockito.mock(ApiParam.class);
-        Mockito.when(p.getField()).thenReturn(field);
-        Mockito.when(p.getType()).thenReturn(type);
-        Mockito.when(p.isRequired()).thenReturn(required);
-        Mockito.when(p.getChildren()).thenReturn(null);
+    private static ApiParam mockParam(String name, String type, boolean required) {
+        ApiParam p = new ApiParam();
+        p.setName(name);
+        p.setType(type);
+        p.setRequired(required);
         return p;
     }
 }

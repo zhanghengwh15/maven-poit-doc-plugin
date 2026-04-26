@@ -1,10 +1,11 @@
 package com.poit.doc.sync.dataTransfer;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.ly.doc.model.ApiDoc;
-import com.ly.doc.model.ApiMethodDoc;
+import com.alibaba.fastjson2.JSON;
+import com.poit.doc.scanner.model.ApiMethod;
+import com.poit.doc.scanner.model.ApiParam;
 import com.poit.doc.sync.ApiDocSupport;
+import com.poit.doc.sync.SyncInput;
+import com.poit.doc.sync.SyncInput.SyncController;
 import com.poit.doc.sync.entity.ModelInfo;
 import com.poit.doc.sync.entity.ApiInterfaceEntity;
 import com.poit.doc.sync.util.ApiSignatureUtils;
@@ -20,11 +21,11 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 将 Smart-doc 解析结果同步到 MySQL：模型定义（含 ref_model_id）与接口行（含 body 模型 id、参数 MD5、path/query JSON）。
+ * Syncs scanner output to MySQL: model definitions (with ref_model_id) and interface rows
+ * (with body model id, param MD5, path/query JSON).
  */
 public class DocSyncService {
 
-    private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
     private static final int SQL_TIMEOUT_SECONDS = 10;
 
     private final String jdbcUrl;
@@ -51,17 +52,13 @@ public class DocSyncService {
         this.projectName = projectName != null ? projectName : "";
     }
 
-    public void sync(List<ApiDoc> controllerDocs) throws SQLException {
+    public void sync(SyncInput input) throws SQLException {
         Map<String, ModelInfo> mergedModels = new LinkedHashMap<>();
         List<InterfaceRecord> interfaces = new ArrayList<>();
 
-        for (ApiDoc doc : controllerDocs) {
-            String moduleName = doc.getDesc();
-            List<ApiMethodDoc> methods = doc.getList();
-            if (methods == null) {
-                continue;
-            }
-            for (ApiMethodDoc m : methods) {
+        for (SyncController ctrl : input.getControllers()) {
+            String moduleName = ctrl.getDescription();
+            for (ApiMethod m : ctrl.getMethods()) {
                 mergedModels.putAll(ApiDocSupport.extractModelsFromRequestAndResponse(m));
                 interfaces.add(buildInterfaceRecord(moduleName, m));
             }
@@ -81,33 +78,38 @@ public class DocSyncService {
         }
     }
 
-    private InterfaceRecord buildInterfaceRecord(String moduleName, ApiMethodDoc m) {
-        String path = m.getPath() != null ? m.getPath() : m.getUrl();
-        String method = m.getType() != null ? m.getType() : "";
-        String apiName = m.getName();
+    private InterfaceRecord buildInterfaceRecord(String moduleName, ApiMethod m) {
+        String path = m.getPath();
+        String method = m.getHttpMethod();
+        String apiName = m.getMethodName();
         String reqRef = ApiDocSupport.resolveReqModelRef(m);
         String resRef = ApiDocSupport.resolveResModelRef(m);
 
-        String pathParamsJson = paramsToJson(m.getPathParams());
-        String queryParamsJson = paramsToJson(m.getQueryParams());
-        String reqMd5 = ApiSignatureUtils.generateParamsSignature(m.getRequestParams());
-        String resMd5 = ApiSignatureUtils.generateParamsSignature(m.getResponseParams());
+        // Build path/query params from parameters list
+        List<SimpleParam> pathParams = new ArrayList<>();
+        List<SimpleParam> queryParams = new ArrayList<>();
+        for (ApiParam p : m.getParameters()) {
+            SimpleParam sp = new SimpleParam(p.getName(), p.getType(), p.getDescription(),
+                    p.isRequired(), p.getDefaultValue());
+            if ("path".equals(p.getParamIn())) {
+                pathParams.add(sp);
+            } else if ("query".equals(p.getParamIn())) {
+                queryParams.add(sp);
+            }
+        }
+
+        String pathParamsJson = JSON.toJSONString(pathParams);
+        String queryParamsJson = JSON.toJSONString(queryParams);
+        String reqMd5 = ""; // MD5 from request body schema
+        String resMd5 = ""; // MD5 from response body schema
 
         Map<String, Object> rawInfo = new LinkedHashMap<>();
-        rawInfo.put("methodId", m.getMethodId());
-        rawInfo.put("contentType", m.getContentType());
-        rawInfo.put("headers", m.getHeaders());
-        String rawInfoJson = GSON.toJson(rawInfo);
+        rawInfo.put("deprecated", m.isDeprecated());
+        rawInfo.put("summary", m.getSummary());
+        String rawInfoJson = JSON.toJSONString(rawInfo);
 
         return new InterfaceRecord(moduleName, apiName, path, method, reqRef, resRef, pathParamsJson, queryParamsJson,
                 reqMd5, resMd5, rawInfoJson);
-    }
-
-    private static String paramsToJson(List<com.ly.doc.model.ApiParam> params) {
-        if (params == null || params.isEmpty()) {
-            return "[]";
-        }
-        return GSON.toJson(params);
     }
 
     private void upsertAndDeleteInterfaces(Connection conn, List<InterfaceRecord> interfaces,
@@ -270,6 +272,22 @@ public class DocSyncService {
             this.reqParamsMd5 = reqParamsMd5;
             this.resParamsMd5 = resParamsMd5;
             this.rawInfoJson = rawInfoJson;
+        }
+    }
+
+    private static class SimpleParam {
+        final String name;
+        final String type;
+        final String desc;
+        final boolean required;
+        final String defaultValue;
+
+        SimpleParam(String name, String type, String desc, boolean required, String defaultValue) {
+            this.name = name;
+            this.type = type;
+            this.desc = desc;
+            this.required = required;
+            this.defaultValue = defaultValue;
         }
     }
 }

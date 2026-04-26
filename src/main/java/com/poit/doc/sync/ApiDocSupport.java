@@ -2,23 +2,22 @@ package com.poit.doc.sync;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.ly.doc.model.ApiDoc;
-import com.ly.doc.model.ApiMethodDoc;
-import com.ly.doc.model.ApiParam;
+import com.poit.doc.scanner.model.ApiField;
+import com.poit.doc.scanner.model.ApiMethod;
+import com.poit.doc.scanner.model.ApiParam;
 import com.poit.doc.sync.entity.ModelInfo;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.LinkedHashSet;
 
 /**
- * 将 Smart-doc 的 {@link ApiDoc} 树打平，并抽取模型字段（扁平 JSON + ref）与接口根类型引用。
+ * Flattens self-owned ApiMethod trees into model definitions (flat JSON + ref).
+ * No dependency on Smart-doc types.
  */
 public final class ApiDocSupport {
 
@@ -27,61 +26,42 @@ public final class ApiDocSupport {
     private ApiDocSupport() {
     }
 
-    /**
-     * 内部类：用于累积模型的字段列表和描述。
-     */
     private static class ModelFields {
         String description = "";
         List<Map<String, Object>> fields = new ArrayList<>();
     }
 
-    public static List<ApiDoc> flattenControllerDocs(List<ApiDoc> roots) {
-        List<ApiDoc> out = new ArrayList<>();
-        if (roots == null) {
-            return out;
-        }
-        for (ApiDoc root : roots) {
-            collectWithMethods(root, out);
-        }
-        return out;
-    }
-
-    private static void collectWithMethods(ApiDoc doc, List<ApiDoc> sink) {
-        if (doc == null) {
-            return;
-        }
-        List<ApiMethodDoc> methods = doc.getList();
-        if (methods != null && !methods.isEmpty()) {
-            sink.add(doc);
-        }
-        List<ApiDoc> children = doc.getChildrenApiDocs();
-        if (children != null) {
-            for (ApiDoc c : children) {
-                collectWithMethods(c, sink);
+    public static Map<String, ModelInfo> extractModelsFromRequestAndResponse(ApiMethod method) {
+        Map<String, ModelFields> acc = new LinkedHashMap<>();
+        Set<String> completed = new LinkedHashSet<>();
+        // Extract from body params (request)
+        for (ApiParam p : method.getParameters()) {
+            if ("body".equals(p.getParamIn()) && p.getBodySchema() != null) {
+                walkField(p.getBodySchema(), acc, completed);
             }
         }
-    }
-
-    public static Map<String, ModelInfo> extractModelsFromMethod(ApiMethodDoc method) {
-        Map<String, ModelFields> acc = new LinkedHashMap<>();
-        Set<String> completed = new LinkedHashSet<>();
-        visitParamList(method.getRequestParams(), acc, completed);
-        visitParamList(method.getResponseParams(), acc, completed);
-        visitParamList(method.getPathParams(), acc, completed);
-        visitParamList(method.getQueryParams(), acc, completed);
-
+        // Extract from response body
+        if (method.getResponseBody() != null) {
+            walkField(method.getResponseBody(), acc, completed);
+        }
         return toModelInfoMap(acc);
     }
 
-    /**
-     * 仅从请求体 / 响应体参数树抽取模型（不含 path/query），用于 api_model_definition 入库。
-     */
-    public static Map<String, ModelInfo> extractModelsFromRequestAndResponse(ApiMethodDoc method) {
-        Map<String, ModelFields> acc = new LinkedHashMap<>();
-        Set<String> completed = new LinkedHashSet<>();
-        visitParamList(method.getRequestParams(), acc, completed);
-        visitParamList(method.getResponseParams(), acc, completed);
-        return toModelInfoMap(acc);
+    public static String resolveReqModelRef(ApiMethod m) {
+        if (m == null) return null;
+        for (ApiParam p : m.getParameters()) {
+            if ("body".equals(p.getParamIn()) && p.getBodySchema() != null) {
+                return p.getBodySchema().getRef();
+            }
+            String ref = objectLikeRef(p.getBodySchema());
+            if (ref != null) return ref;
+        }
+        return null;
+    }
+
+    public static String resolveResModelRef(ApiMethod m) {
+        if (m == null) return null;
+        return objectLikeRef(m.getResponseBody());
     }
 
     private static Map<String, ModelInfo> toModelInfoMap(Map<String, ModelFields> acc) {
@@ -96,138 +76,82 @@ public final class ApiDocSupport {
         return result;
     }
 
-    public static String resolveReqModelRef(ApiMethodDoc m) {
-        if (m == null) {
-            return null;
-        }
-        if (m.getIsRequestArray() != null && m.getIsRequestArray() == 1 && notBlank(m.getRequestArrayType())) {
-            return m.getRequestArrayType();
-        }
-        return firstObjectLikeRef(m.getRequestParams());
-    }
-
-    public static String resolveResModelRef(ApiMethodDoc m) {
-        if (m == null) {
-            return null;
-        }
-        if (m.getIsResponseArray() != null && m.getIsResponseArray() == 1 && notBlank(m.getResponseArrayType())) {
-            return m.getResponseArrayType();
-        }
-        return firstObjectLikeRef(m.getResponseParams());
-    }
-
-    private static void visitParamList(List<ApiParam> params, Map<String, ModelFields> acc, Set<String> completed) {
-        if (params == null) {
-            return;
-        }
-        for (ApiParam p : params) {
-            walkParam(p, acc, completed, new ArrayDeque<>());
-        }
-    }
-
-    private static void walkParam(ApiParam p, Map<String, ModelFields> acc, Set<String> completed,
-            Deque<String> stack) {
-        if (p == null) {
-            return;
-        }
-        String type = lower(p.getType());
-        String full = trimToNull(p.getFullyTypeName());
+    private static void walkField(ApiField f, Map<String, ModelFields> acc, Set<String> completed) {
+        if (f == null) return;
+        String type = lower(f.getType());
+        String full = trimToNull(f.getRef());
 
         if ("object".equals(type) && full != null) {
-            if (completed.contains(full)) {
-                return;
-            }
-            if (stack.contains(full)) {
-                return;
-            }
-            stack.addLast(full);
-            ModelFields mf = new ModelFields();
-            // 从 ApiParam 的 desc 提取模型描述
-            mf.description = p.getDesc() != null ? p.getDesc() : "";
-            List<ApiParam> children = p.getChildren();
-            if (children != null) {
-                for (ApiParam c : children) {
-                    mf.fields.add(fieldRow(c));
-                    walkParam(c, acc, completed, stack);
-                }
-            }
-            stack.removeLast();
-            acc.putIfAbsent(full, mf);
+            if (completed.contains(full)) return;
             completed.add(full);
+
+            ModelFields mf = new ModelFields();
+            mf.description = f.getDescription() != null ? f.getDescription() : "";
+            List<ApiField> children = f.getChildren();
+            if (children != null) {
+                for (ApiField c : children) {
+                    mf.fields.add(fieldRow(c));
+                    walkField(c, acc, completed);
+                }
+            }
+            completed.remove(full);
+            acc.putIfAbsent(full, mf);
             return;
         }
 
-        if ("array".equals(type)) {
-            List<ApiParam> children = p.getChildren();
+        if ("array".equals(type) || f.isCollection()) {
+            List<ApiField> children = f.getChildren();
             if (children != null) {
-                for (ApiParam c : children) {
-                    walkParam(c, acc, completed, stack);
+                for (ApiField c : children) {
+                    walkField(c, acc, completed);
                 }
             }
             return;
         }
 
-        List<ApiParam> rest = p.getChildren();
+        List<ApiField> rest = f.getChildren();
         if (rest != null) {
-            for (ApiParam c : rest) {
-                walkParam(c, acc, completed, stack);
+            for (ApiField c : rest) {
+                walkField(c, acc, completed);
             }
         }
     }
 
-    private static Map<String, Object> fieldRow(ApiParam c) {
+    private static Map<String, Object> fieldRow(ApiField c) {
         Map<String, Object> row = new LinkedHashMap<>();
-        row.put("name", c.getField());
+        row.put("name", c.getName());
         row.put("type", c.getType());
-        row.put("desc", c.getDesc());
+        row.put("desc", c.getDescription());
         row.put("required", c.isRequired());
         String ct = lower(c.getType());
-        String fn = trimToNull(c.getFullyTypeName());
-        if (fn != null && ("object".equals(ct) || "array".equals(ct))) {
+        String fn = trimToNull(c.getRef());
+        if (fn != null && ("object".equals(ct) || "array".equals(ct) || c.isCollection())) {
             row.put("ref", fn);
+        }
+        if (c.isEnum()) {
+            row.put("enumValues", c.getEnumValues());
         }
         return row;
     }
 
-    private static String firstObjectLikeRef(List<ApiParam> params) {
-        if (params == null) {
-            return null;
-        }
-        for (ApiParam p : params) {
-            String r = objectLikeRef(p);
-            if (r != null) {
-                return r;
-            }
-        }
-        return null;
-    }
-
-    private static String objectLikeRef(ApiParam p) {
-        if (p == null) {
-            return null;
-        }
-        String type = lower(p.getType());
-        String fn = trimToNull(p.getFullyTypeName());
-        if (fn == null) {
-            return null;
-        }
-        if ("object".equals(type)) {
-            return fn;
-        }
-        if ("array".equals(type)) {
-            List<ApiParam> ch = p.getChildren();
+    private static String objectLikeRef(ApiField f) {
+        if (f == null) return null;
+        String type = lower(f.getType());
+        String fn = trimToNull(f.getRef());
+        if (fn == null) return null;
+        if ("object".equals(type)) return fn;
+        if ("array".equals(type) || f.isCollection()) {
+            List<ApiField> ch = f.getChildren();
             if (ch != null && !ch.isEmpty()) {
                 return objectLikeRef(ch.get(0));
             }
             return fn;
         }
-        List<ApiParam> ch = p.getChildren();
+        List<ApiField> ch = f.getChildren();
         if (ch != null) {
-            for (ApiParam c : ch) {
+            for (ApiField c : ch) {
                 String r = objectLikeRef(c);
-                if (r != null) {
-                    return r;
-                }
+                if (r != null) return r;
             }
         }
         return null;
@@ -237,14 +161,8 @@ public final class ApiDocSupport {
         return s == null ? "" : s.toLowerCase(Locale.ROOT);
     }
 
-    private static boolean notBlank(String s) {
-        return s != null && !s.trim().isEmpty();
-    }
-
     private static String trimToNull(String s) {
-        if (s == null) {
-            return null;
-        }
+        if (s == null) return null;
         String t = s.trim();
         return t.isEmpty() ? null : t;
     }

@@ -1,16 +1,17 @@
 package com.poit.doc.cli;
 
-import com.ly.doc.model.ApiDoc;
+import com.poit.doc.scanner.ApiScannerEngine;
 import com.poit.doc.scanner.SourceRootDiscovery;
-import com.poit.doc.sync.ApiDocSupport;
-import com.poit.doc.sync.config.SmartDocBootstrap;
-import com.poit.doc.sync.config.SmartDocRunConfig;
+import com.poit.doc.sync.SyncInput;
 import com.poit.doc.sync.dataTransfer.DocSyncService;
+import com.thoughtworks.qdox.JavaProjectBuilder;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 
 import java.io.File;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.SQLException;
@@ -19,10 +20,8 @@ import java.util.List;
 import java.util.concurrent.Callable;
 
 /**
- * 独立可执行扫描器：扫描指定目录下源码 → Smart-doc 解析 → MySQL Upsert。
- * <p>
- * 打包后：{@code java -jar poit-api-scanner-cli-*.jar scan --scan-dir=/path/to/repo ...}
- * </p>
+ * Standalone CLI: scan Java source code for API definitions and sync to MySQL.
+ * Uses QDox/ASM-based scanner (no Smart-doc dependency).
  */
 @Command(
         name = "poit-api-scanner",
@@ -65,13 +64,10 @@ public final class PoitApiScannerCli implements Callable<Integer> {
             description = "写入库时使用的 artifactId；省略时从 --scan-dir/pom.xml 读取 artifactId（须为 Maven 工程根目录）")
     private String artifactId;
 
-    @Option(names = {"--framework"}, defaultValue = "spring", description = "Smart-doc 框架标识")
-    private String framework;
-
-    @Option(names = {"--package-filters"}, description = "包过滤，Smart-doc 语法")
+    @Option(names = {"--package-filters"}, description = "包过滤（逗号分隔的包前缀）")
     private String packageFilters;
 
-    @Option(names = {"--package-exclude-filters"}, description = "排除包")
+    @Option(names = {"--package-exclude-filters"}, description = "排除包（逗号分隔的包前缀）")
     private String packageExcludeFilters;
 
     @Option(
@@ -126,50 +122,68 @@ public final class PoitApiScannerCli implements Callable<Integer> {
             return 2;
         }
 
-        SmartDocRunConfig cfg = new SmartDocRunConfig();
-        cfg.setBaseDir(root.getAbsolutePath());
-        cfg.setProjectName(displayName);
-        cfg.setFramework(framework);
-        if (packageFilters != null && !packageFilters.isEmpty()) {
-            cfg.setPackageFilters(packageFilters);
-        }
-        if (packageExcludeFilters != null && !packageExcludeFilters.isEmpty()) {
-            cfg.setPackageExcludeFilters(packageExcludeFilters);
-        }
-
+        // Build source path list
+        List<String> effectiveSourcePaths;
         if (sourcePaths != null && !sourcePaths.isEmpty()) {
-            List<String> paths = new ArrayList<>();
+            effectiveSourcePaths = new ArrayList<>();
             for (Path p : sourcePaths) {
                 if (p != null) {
-                    paths.add(p.toAbsolutePath().normalize().toString());
+                    effectiveSourcePaths.add(p.toAbsolutePath().normalize().toString());
                 }
-            }
-            if (!paths.isEmpty()) {
-                cfg.setSourcePaths(paths);
             }
         } else {
             List<String> discovered = SourceRootDiscovery.discoverFromTree(root, null);
-            List<String> filtered = filterApiAndAppModules(discovered);
-            if (!filtered.isEmpty()) {
-                cfg.setSourcePaths(filtered);
+            effectiveSourcePaths = filterApiAndAppModules(discovered);
+        }
+
+        // Build QDox JavaProjectBuilder
+        JavaProjectBuilder builder = new JavaProjectBuilder();
+        for (String p : effectiveSourcePaths) {
+            File dir = new File(p);
+            if (dir.isDirectory()) {
+                builder.addSourceTree(dir);
             }
         }
 
-        List<ApiDoc> roots = SmartDocBootstrap.loadApiDocs(cfg);
-        List<ApiDoc> controllers = ApiDocSupport.flattenControllerDocs(roots);
+        // Run scanner
+        ClassLoader classLoader = buildClassLoader();
+        ApiScannerEngine engine = new ApiScannerEngine(builder, classLoader,
+                packageFilters, packageExcludeFilters);
 
+        SyncInput input = engine.scan();
+        System.out.println("扫描完成，Controller 数: " + input.getControllers().size());
+
+        // Sync to database
         DocSyncService sync = new DocSyncService(dbUrl, dbUser, dbPassword, effectiveServiceName, serviceVersion, env,
                 art);
         try {
-            sync.sync(controllers);
+            sync.sync(input);
         } catch (SQLException e) {
             System.err.println("写入数据库失败: " + e.getMessage());
             e.printStackTrace(System.err);
             return 1;
         }
 
-        System.out.println("同步完成，Controller 文档数: " + controllers.size());
+        System.out.println("同步完成");
         return 0;
+    }
+
+    private static ClassLoader buildClassLoader() {
+        try {
+            List<URL> urls = new ArrayList<>();
+            String classpath = System.getProperty("java.class.path");
+            if (classpath != null) {
+                for (String el : classpath.split(File.pathSeparator)) {
+                    if (!el.isEmpty()) {
+                        urls.add(new File(el).toURI().toURL());
+                    }
+                }
+            }
+            return new URLClassLoader(urls.toArray(new URL[0]),
+                    Thread.currentThread().getContextClassLoader());
+        } catch (Exception e) {
+            return Thread.currentThread().getContextClassLoader();
+        }
     }
 
     private static boolean nonBlank(String s) {
@@ -177,10 +191,7 @@ public final class PoitApiScannerCli implements Callable<Integer> {
     }
 
     /**
-     * 过滤源码路径，只保留以 -api 或 -app 结尾的模块
-     *
-     * @param sourcePaths 原始源码路径列表
-     * @return 过滤后的源码路径列表
+     * Filter source paths to keep only -api or -app modules.
      */
     private static List<String> filterApiAndAppModules(List<String> sourcePaths) {
         if (sourcePaths == null || sourcePaths.isEmpty()) {
@@ -196,11 +207,7 @@ public final class PoitApiScannerCli implements Callable<Integer> {
     }
 
     /**
-     * 判断路径是否属于 -api 或 -app 模块
-     * 匹配规则：路径中包含 "/xxx-api/" 或 "/xxx-app/" 格式的目录
-     *
-     * @param path 源码路径
-     * @return 是否为 api 或 app 模块
+     * Check if a path belongs to an -api or -app module.
      */
     private static boolean isApiOrAppModule(String path) {
         if (path == null || path.isEmpty()) {
@@ -208,10 +215,8 @@ public final class PoitApiScannerCli implements Callable<Integer> {
         }
         String normalizedPath = path.replace("\\", "/");
         String[] segments = normalizedPath.split("/");
-        // 从后往前查找，找包含 src/main/java 的上一级目录
         for (int i = segments.length - 1; i >= 0; i--) {
             if ("src".equals(segments[i])) {
-                // src 的上一级目录就是模块名
                 if (i > 0) {
                     String moduleName = segments[i - 1];
                     return moduleName.endsWith("-api") || moduleName.endsWith("-app");
